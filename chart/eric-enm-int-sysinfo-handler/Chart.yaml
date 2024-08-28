@@ -1,0 +1,10 @@
+apiVersion: v2
+appVersion: '1.0'
+dependencies:
+- condition: eric-si-application-sys-info-handler.enabled
+  name: eric-si-application-sys-info-handler
+  repository: https://arm.sero.gic.ericsson.se/artifactory/proj-adp-eric-application-sys-info-handler-released-helm
+  version: 2.25.0+19
+description: A Helm chart for Application Sys Info Handler
+name: eric-enm-int-sysinfo-handler
+version: 1.0.1-7

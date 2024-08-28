@@ -1,0 +1,31 @@
+global:
+  registry:
+    url: armdocker.rnd.ericsson.se
+    pullSecret:
+    imagePullPolicy: "IfNotPresent"
+  pullSecret:
+  security:
+    tls:
+      enabled: false
+imageCredentials:
+  pullSecret:
+  registry:
+    url:
+    imagePullPolicy:
+  repoPath:
+
+eric-si-application-sys-info-handler:
+  enabled: true
+  global:
+    security:
+      tls:
+        enabled: false
+  applicationInfoService:
+    enabled: false
+    sendAppReport: false
+  asih:
+    enableCmypConfig: false
+    networkPolicy:
+      enabled: false
+    uploadSwimInformation: false
+    applicationId:

@@ -1,0 +1,206 @@
+{
+  "id": "9f1d1323-e464-4a6c-a616-661e1c16651c",
+  "metadata": {
+    "description": "A pipeline template derived from pipeline \"ENM-eric-enm-int-sysinfo-handler-Staging-Flow\" in application \"cn-enm-adp-staging\"",
+    "name": "average-hound-64",
+    "owner": "james.e.sheridan@ericsson.com",
+    "scopes": [
+      "global"
+    ]
+  },
+  "pipeline": {
+    "appConfig": {},
+    "disabled": false,
+    "keepWaitingPipelines": false,
+    "lastModifiedBy": "emaucam",
+    "limitConcurrent": true,
+    "notifications": [
+      {
+        "address": "mauro.campedelli@ericsson.com",
+        "level": "pipeline",
+        "type": "email",
+        "when": [
+          "pipeline.starting",
+          "pipeline.failed"
+        ]
+      }
+    ],
+    "parameterConfig": [
+      {
+        "default": "",
+        "description": "",
+        "hasOptions": false,
+        "label": "CHART_NAME",
+        "name": "CHART_NAME",
+        "options": [
+          {
+            "value": ""
+          }
+        ],
+        "pinned": false,
+        "required": false
+      },
+      {
+        "default": "",
+        "description": "",
+        "hasOptions": false,
+        "label": "CHART_VERSION",
+        "name": "CHART_VERSION",
+        "options": [
+          {
+            "value": ""
+          }
+        ],
+        "pinned": false,
+        "required": false
+      },
+      {
+        "default": "",
+        "description": "",
+        "hasOptions": false,
+        "label": "CHART_REPO",
+        "name": "CHART_REPO",
+        "options": [
+          {
+            "value": ""
+          }
+        ],
+        "pinned": false,
+        "required": false
+      },
+      {
+        "default": "",
+        "description": "",
+        "hasOptions": false,
+        "label": "",
+        "name": "GERRIT_REFSPEC",
+        "options": [
+          {
+            "value": ""
+          }
+        ],
+        "pinned": false,
+        "required": false
+      }
+    ],
+    "schema": "1",
+    "stages": [
+      {
+        "continuePipeline": false,
+        "failPipeline": true,
+        "job": "eric-enm-int-sysinfo-handler_prepare",
+        "master": "oss-fem16s11-eiffel004",
+        "name": "eric-enm-int-sysinfo-handler_prepare",
+        "notifications": [
+          {
+            "address": "mauro.campedelli@ericsson.com",
+            "level": "stage",
+            "type": "email",
+            "when": [
+              "stage.failed"
+            ]
+          },
+          {
+            "address": "aldo.quaranta@ericsson.com",
+            "level": "stage",
+            "type": "email",
+            "when": [
+              "stage.failed"
+            ]
+          }
+        ],
+        "parameters": {
+          "CHART_NAME": "${parameters['CHART_NAME']}",
+          "CHART_REPO": "${parameters['CHART_REPO']}",
+          "CHART_VERSION": "${parameters['CHART_VERSION']}",
+          "GERRIT_REFSPEC": "${trigger['parameters']['GERRIT_REFSPEC']}"
+        },
+        "propertyFile": "artifact.properties",
+        "refId": "1",
+        "requisiteStageRefIds": [],
+        "sendNotifications": true,
+        "type": "jenkins"
+      },
+      {
+        "continuePipeline": false,
+        "failPipeline": true,
+        "job": "eric-enm-int-sysinfo-handler_test",
+        "master": "oss-fem16s11-eiffel004",
+        "name": "eric-enm-int-sysinfo-handler_test",
+        "notifications": [
+          {
+            "address": "mauro.campedelli@ericsson.com",
+            "level": "stage",
+            "type": "email",
+            "when": [
+              "stage.failed"
+            ]
+          },
+          {
+            "address": "aldo.quaranta@ericsson.com",
+            "level": "stage",
+            "type": "email",
+            "when": [
+              "stage.failed"
+            ]
+          }
+        ],
+        "parameters": {
+          "INT_CHART_REPO": "${ #stage('eric-enm-int-sysinfo-handler_prepare')['context']['INT_CHART_REPO'] }",
+          "INT_CHART_VERSION": "${ #stage('eric-enm-int-sysinfo-handler_prepare')['context']['INT_CHART_VERSION'] }",
+          "NAMESPACE": "${ #stage('eric-enm-int-sysinfo-handler_prepare')['context']['INT_CHART_NAME'] }"
+        },
+        "propertyFile": "",
+        "refId": "2",
+        "requisiteStageRefIds": [
+          "1"
+        ],
+        "sendNotifications": true,
+        "type": "jenkins",
+        "waitForCompletion": true
+      },
+      {
+        "continuePipeline": false,
+        "failPipeline": true,
+        "job": "eric-enm-int-sysinfo-handler_publish",
+        "master": "oss-fem16s11-eiffel004",
+        "name": "eric-enm-int-sysinfo-handler_publish",
+        "notifications": [
+          {
+            "address": "mauro.campedelli@ericsson.com",
+            "level": "stage",
+            "type": "email",
+            "when": [
+              "stage.failed"
+            ]
+          },
+          {
+            "address": "aldo.quaranta@ericsson.com",
+            "level": "stage",
+            "type": "email",
+            "when": [
+              "stage.failed"
+            ]
+          }
+        ],
+        "parameters": {
+          "CHART_NAME": "${parameters['CHART_NAME']}",
+          "CHART_REPO": "${parameters['CHART_REPO']}",
+          "CHART_VERSION": "${parameters['CHART_VERSION']}"
+        },
+        "propertyFile": "artifact.properties",
+        "refId": "4",
+        "requisiteStageRefIds": [
+          "2"
+        ],
+        "sendNotifications": true,
+        "type": "jenkins"
+      }
+    ],
+    "triggers": [],
+    "updateTs": "1714483060618"
+  },
+  "protect": false,
+  "schema": "v2",
+  "variables": []
+}

@@ -1,0 +1,133 @@
+#!/usr/bin/env groovy
+
+def defaultBobImage = 'armdocker.rnd.ericsson.se/sandbox/adp-staging/adp-cicd/bob.2.0:1.5.0-1'
+
+def bob = new BobCommand()
+        .bobImage(defaultBobImage)
+        .envVars([NAMESPACE: '${NAMESPACE}',
+                 'INT_CHART_REPO': env.INT_CHART_REPO,
+                 'INT_CHART_VERSION': env.INT_CHART_VERSION,
+        ])
+        .needDockerSocket(true)
+        .toString()
+
+
+pipeline {
+    agent {
+            node
+            {
+               label SLAVE
+            }
+        }
+   environment {
+        cenm_utilities_docker_image = "armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest"
+        kubeConfig = "${workspace}/.kube/admin.conf"
+        helm = "docker run --rm -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} helm"
+        kubectl = "docker run --rm  -v ${kubeConfig}:/root/.kube/config -v ${WORKSPACE}:${WORKSPACE} --workdir ${WORKSPACE} ${cenm_utilities_docker_image} kubectl"
+    }
+    stages {
+        stage('Clean') {
+            steps {
+                 sh "${bob} -r ruleset2.0.yaml clean"
+            }
+        }
+        stage('Inject Credentials file') {
+            steps {
+                script {
+                    withCredentials( [file(credentialsId: 'cn_enm_staging.conf', variable: 'KUBECONFIG')]) {
+                        sh 'mkdir -p ${PWD}/.kube && chmod 775 ${PWD}/.kube'
+                        sh "install -m 600 ${KUBECONFIG} ${WORKSPACE}/.kube/admin.conf"
+                        sh "cat ${WORKSPACE}/.kube/admin.conf"
+                    }
+                }
+            }
+        }
+        stage('Create namespace') {
+            steps {
+                script {
+                   sh "${bob} -r ruleset2.0.yaml create-namespace"
+                }
+            }
+        }
+        stage('Download int chart') {
+            steps {
+                  script {
+                    sh "${bob} -r ruleset2.0.yaml download-helm-chart"
+                  }    
+            }
+        }
+       stage('Install Helm Chart') {
+          steps {
+             script {
+                    sh "${bob} -r ruleset2.0.yaml install-helm-chart"
+             }
+          }
+       }
+       stage('Test cases') {
+            steps {
+                script {
+                        sh "${bob} -r ruleset2.0.yaml test-cases"
+                }
+            }
+       }
+        stage('Teardown namespace') {
+            steps {
+                script {
+                    sh "${bob} -r ruleset2.0.yaml teardown"
+                }
+            }
+        }
+
+    }
+    post {
+        failure {
+            script{
+                 sh "${bob} -r ruleset2.0.yaml teardown"
+            }
+        }
+        success {
+            script {
+                sh "${bob} -r ruleset2.0.yaml clean-test"
+            }
+        }
+    }
+}
+
+
+// More about @Builder: http://mrhaki.blogspot.com/2014/05/groovy-goodness-use-builder-ast.html
+import groovy.transform.builder.Builder
+import groovy.transform.builder.SimpleStrategy
+@Builder(builderStrategy = SimpleStrategy, prefix = '')
+class BobCommand {
+    def bobImage = 'bob.2.0:latest'
+    def envVars = [:]
+    def needDockerSocket = false
+
+    String toString() {
+        def env = envVars
+                .collect({ entry -> "-e ${entry.key}=\"${entry.value}\"" })
+                .join(' ')
+
+        def cmd = """\
+            |docker run
+            |--init
+            |--rm
+            |--workdir \${PWD}
+            |--user \$(id -u):\$(id -g)
+            |-v \${PWD}:\${PWD}
+            |-v /etc/group:/etc/group:ro
+            |-v /etc/passwd:/etc/passwd:ro
+            |-v \${HOME}/.m2:\${HOME}/.m2
+            |-v \${HOME}/.docker:\${HOME}/.docker
+            |${needDockerSocket ? '-v /var/run/docker.sock:/var/run/docker.sock' : ''}
+            |${env}
+            |\$(for group in \$(id -G); do printf ' --group-add %s' "\$group"; done)
+            |--group-add \$(stat -c '%g' /var/run/docker.sock)
+            |${bobImage}
+            |"""
+        return cmd
+                .stripMargin()           // remove indentation
+                .replace('\n', ' ')      // join lines
+                .replaceAll(/[ ]+/, ' ') // replace multiple spaces by one
+    }
+}

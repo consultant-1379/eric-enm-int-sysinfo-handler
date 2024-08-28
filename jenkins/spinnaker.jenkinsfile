@@ -1,0 +1,37 @@
+#!/usr/bin/env groovy
+
+
+def configure_spin_cli_config() {
+    sh 'sed -i -e "s/SPINNAKER_USERNAME/${func_user_username}/g" "${WORKSPACE}"/spinnaker_files/config/spin_cli.config'
+    sh 'sed -i -e "s/SPINNAKER_PASSWORD/${func_user_password}/g" "${WORKSPACE}"/spinnaker_files/config/spin_cli.config'
+    sh 'sed -i -e "s/APPLICATION_NAME/${spinnaker_application_name}/g" "${WORKSPACE}"/spinnaker_files/pipelines//enm-app-staging-license-manager.json'
+    sh 'sed -i -e "s/PIPELINE_NAME/${spinnaker_pipeline_name}/g" "${WORKSPACE}"/spinnaker_files/pipelines//enm-app-staging-license-manager.json'
+    sh 'sed -i -e "s/FEM_CONTROLLER/${spinnaker_fem_controller}/g" "${WORKSPACE}"/spinnaker_files/pipelines//enm-app-staging-license-manager.json'
+}
+
+pipeline {
+    agent {
+            node
+            {
+               label SLAVE
+            }
+        }
+
+    stages {
+        stage('Updating Spinnaker cli file with inputted parameters') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'cenmbuild_functional_id', usernameVariable: 'func_user_username', passwordVariable: 'func_user_password')]) {
+                  echo 'Set up spin cli config file'
+                  configure_spin_cli_config()
+                }
+            }
+        }
+       stage('Update spinnaker pipeline') {
+            steps {
+               echo 'Rolling out spinnaker pipeline changes...'
+               sh 'docker run -v ${WORKSPACE}/spinnaker_files/config/spin_cli.config:/root/.spin/config:ro -v ${WORKSPACE}/spinnaker_files/pipelines/enm-int-sysinfo-handler-app-staging.json:/pipeline.json:ro --rm armdocker.rnd.ericsson.se/proj-adp-cicd-drop/spin spin pipeline save --file /pipeline.json'
+            }
+        }
+
+    }
+}

@@ -1,0 +1,5 @@
+eric-si-application-sys-info-handler:
+  applicationInfoService:
+    port: 9095
+  asih:
+    applicationId: "test-id"

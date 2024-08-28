@@ -1,0 +1,7 @@
+*.idea
+*.bob
+*.iml
+lib/
+design-rule-check-report*
+test-output*
+chart/eric-enm-int-sysinfo-handler/charts/

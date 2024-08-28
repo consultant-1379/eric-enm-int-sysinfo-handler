@@ -1,0 +1,253 @@
+modelVersion: 2.0
+
+description: "ENM: Integration Application Sys Info Handler Pipeline"
+
+docker:
+  registry: https://armdocker.rnd.ericsson.se/proj-enm
+
+docker-images:
+  - adp-release-auto: armdocker.rnd.ericsson.se/proj-adp-cicd-drop/adp-int-helm-chart-auto:latest
+  - adp-helm-dr-check: armdocker.rnd.ericsson.se/sandbox/adp-staging/adp-cicd/common-library-adp-helm-dr-check:latest
+  - eric-enm-version-auto: armdocker.rnd.ericsson.se/proj-enm/eric-enm-version-auto:latest
+  - cnbuild-build-utilities: armdocker.rnd.ericsson.se/proj-enm/cenm-build-utilities:latest
+
+properties:
+  - helm-chart-name: eric-enm-int-sysinfo-handler
+  - helm-chart-repo: https://arm.epk.ericsson.se/artifactory/proj-enm-helm/eric-enm-int-sysinfo-handler/
+  - git_repo_url: https://gerrit-gamma.gic.ericsson.se/a/OSS/ENM-Parent/SQ-Gate/com.ericsson.oss.containerisation/eric-enm-int-sysinfo-handler
+  - int_chart_path: chart/eric-enm-int-sysinfo-handler
+  - chart-repo-internal: https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm/
+  - chart-repo-drop: https://arm.epk.ericsson.se/artifactory/proj-enm-helm/
+
+
+env:
+  - RELEASE (default=true)
+  - ENABLE_HELM_V3 (default=true)
+  - ISO_VERSION (default=1.0.5555)
+  - BUILD_DATE (default = $(date +%d%m%Y-%H%M%S --utc))
+  - AUTHOR_NAME
+  - AUTHOR_EMAIL
+  - GIT_COMMITTER_NAME
+  - GIT_COMMITTER_EMAIL
+  - CHART_NAME (default=eric-si-application-sys-info-handler)
+  - CHART_VERSION
+  - CHART_REPO (default=https://arm.sero.gic.ericsson.se/artifactory/proj-adp-eric-application-sys-info-handler-released-helm-local/)
+  - ARM_API_TOKEN
+  - GERRIT_USERNAME
+  - GERRIT_PASSWORD
+  - GERRIT_REFSPEC (default="")
+  - HELM_REPO_CREDENTIALS
+  - HELM_REPO_TOKEN
+  - HELM_INTERNAL_REPO
+  - NAMESPACE
+  - APPLICATION_ID
+  - INT_CHART_REPO (default=https://arm.epk.ericsson.se/artifactory/proj-enm-dev-internal-helm)
+  - INT_CHART_VERSION
+  - INT_CHART (default=eric-enm-int-sysinfo-handler)
+
+var:
+  - commit-hash
+  - version
+  - version-prefix
+  - rstate
+  - pod-running-status
+  - pod-ip
+  - pod-name
+  - service-pod-name
+
+rules:
+  clean:
+    - task: rm-clean
+      cmd:
+        - rm -rf .bob/
+        - rm -f artifact.properties
+
+  clean-test:
+    - task: clean-test-artifacts
+      cmd:
+        - find ./ -type f -regex '${env.INT_CHART}-.*.tgz' -exec rm {} \;
+        - rm -rf .bob*
+        - rm -rf build
+
+  swap-latest-versions-with-numbers:
+    - task: swap_versions
+      docker-image: eric-enm-version-auto
+      docker-flags:
+        - "--env-file enm_artifact.properties"
+      cmd: python /substitute_values.py
+
+  generate-new-version:
+    - task: generate-version
+      docker-image: adp-release-auto
+      cmd: generate-version -f VERSION_PREFIX --is-release ${env.RELEASE} --output version
+    - task: set-version-prefix
+      cmd: cat VERSION_PREFIX > .bob/var.version-prefix
+    - task: generate-rstate
+      docker-image: adp-release-auto
+      cmd: get_rstate.py ${var.version} > .bob/var.rstate
+    - task: get-commit-hash
+      docker-image: adp-release-auto
+      cmd: git rev-parse --short HEAD > .bob/var.commit-hash
+
+  dep-helm:
+    - task: helm-dep-up
+      docker-image: adp-release-auto
+      docker-flags:
+        - "--env ENABLE_HELM_V3=${env.ENABLE_HELM_V3}"
+      cmd: helm dep up chart/${helm-chart-name}
+
+  lint-helm:
+    - task: helm-lint
+      docker-image: adp-release-auto
+      docker-flags:
+        - "--env ENABLE_HELM_V3=${env.ENABLE_HELM_V3}"
+      cmd: helm lint chart/${helm-chart-name}
+
+  test-helm:
+    - task: helm-chart-check
+      docker-image: adp-helm-dr-check
+      cmd: java -DhelmDesignRule.feature.dependency=1 -jar /helm-dr-check.jar --helm-chart chart/${helm-chart-name} -f test/values.yaml -c
+
+  build-helm:
+    - task: helm-package
+      docker-image: adp-release-auto
+      docker-flags:
+        - "--env ENABLE_HELM_V3=${env.ENABLE_HELM_V3}"
+      cmd: helm-package --folder chart/${helm-chart-name} --version ${var.version} --replace VERSION=${var.version} --replace RSTATE=${var.rstate}
+
+  push-helm:
+    - task: helm-push
+      docker-image: adp-release-auto
+      cmd: upload_file --filename=.bob/${helm-chart-name}-${var.version}.tgz --repository=${helm-chart-repo} --api-token=${env.HELM_REPO_TOKEN}
+
+  create-git-tag:
+    - task: create-git-tag
+      docker-image: adp-release-auto
+      docker-flags:
+        - "--env GIT_COMMITTER_NAME='${env.GIT_COMMITTER_NAME}'"
+        - "--env GIT_COMMITTER_EMAIL='${env.GIT_COMMITTER_EMAIL}'"
+      cmd: git tag --annotate ${var.version} --message "Build Version ${var.version} by ${env.AUTHOR_NAME} <${env.AUTHOR_EMAIL}>"
+
+  remove-git-tag:
+    - task: remove-git-tag
+      docker-image: adp-release-auto
+      cmd: git tag --delete ${var.version}
+
+  create-namespace:
+    - task: create-namespace
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl create namespace ${env.NAMESPACE}
+
+  download-helm-chart:
+    - task: download-helm-chart
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: bash -c "helm repo add eric-enm-int-sysinfo-handler ${env.INT_CHART_REPO} && helm fetch eric-enm-int-sysinfo-handler/eric-enm-int-sysinfo-handler --version ${env.INT_CHART_VERSION}"
+
+  install-helm-chart:
+    - task: install-helm-chart
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: helm install eric-enm-int-sysinfo-handler-test eric-enm-int-sysinfo-handler-${env.INT_CHART_VERSION}.tgz -n ${env.NAMESPACE} -f test/values.yaml --wait --debug  --timeout 1000s
+
+  test-cases:
+    - task: retrieve-pod-name
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl get pods -n ${env.NAMESPACE} | grep si-application-sys-info-handler | awk '{ print $1 }' > .bob/var.pod-name
+
+    - task: retrieve-pod-condition
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl wait --for=condition=Ready pod/${var.pod-name} --timeout=300s -n ${env.NAMESPACE}
+
+    - task: retrieve-service-pod-name
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl get svc -n ${env.NAMESPACE} | grep si-application-sys-info-handler | awk '{ print $1 }' > .bob/var.service-pod-name
+
+    - task: retrieve-pod-ip
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl get pods -n ${env.NAMESPACE} -o wide | grep si-application-sys-info-handler | awk '{ print $6 }' > .bob/var.pod-ip
+
+    - task: pod-running-status
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl get pods -n ${env.NAMESPACE} -o wide | grep si-application-sys-info-handler | awk '{ print $2 }' > .bob/var.pod-running-status
+
+    - task: pod-running-status-check
+      cmd: if [ "${var.pod-running-status}" == "1/1" ]; then echo "RESULT Success-- Pod is up and running"; else echo "RESULT Failed-- Pod is not up and running"; exit 1; fi
+
+  teardown:
+    - task: helm-teardown
+      docker-image: cnbuild-build-utilities
+      docker-flags:
+        - "--env KUBECONFIG=.kube/admin.conf"
+      cmd: kubectl delete namespace ${env.NAMESPACE} --wait --timeout 3m
+
+  prepare:
+    - task: prepare-chart
+      docker-image: adp-release-auto
+      docker-flags:
+        - -v /etc/group:/etc/group:ro
+        - -v /etc/passwd:/etc/passwd:ro
+        - -v '${env.HELM_REPO_CREDENTIALS}':'${env.HELM_REPO_CREDENTIALS}'
+        - --env GERRIT_USERNAME="${env.GERRIT_USERNAME}"
+        - --env GERRIT_PASSWORD="${env.GERRIT_PASSWORD}"
+        - --env GIT_REPO_URL="${git_repo_url}"
+        - --env GERRIT_REFSPEC=${env.GERRIT_REFSPEC}
+        - --env CHART_PATH="${int_chart_path}"
+        - --env HELM_INTERNAL_REPO="${chart-repo-internal}"
+        - --env HELM_DROP_REPO="${chart-repo-internal}"
+        - --env HELM_RELEASED_REPO="${chart-repo-internal}"
+        - --env ARM_API_TOKEN="${env.ARM_API_TOKEN}"
+        - --env ALLOW_DOWNGRADE="true"
+        - --env CHART_NAME="${env.CHART_NAME}"
+        - --env CHART_VERSION="${env.CHART_VERSION}"
+        - --env CHART_REPO="${env.CHART_REPO}"
+        - --env IGNORE_NON_RELEASED="false"
+        - --env AUTOMATIC_RELEASE="false"
+        - --env ALWAYS_RELEASE="true"
+        - --env VERSION_STEP_STRATEGY_DEPENDENCY="DYNAMIC"
+        - --env HELM_REPO_CREDENTIALS="${env.HELM_REPO_CREDENTIALS}"
+        - --env CI_HELM="true"
+      cmd:
+        - ihc-auto prepare
+
+  publish:
+    - task: publish-chart
+      docker-image: adp-release-auto
+      docker-flags:
+        - -v /etc/group:/etc/group:ro
+        - -v /etc/passwd:/etc/passwd:ro
+        - -v '${env.HELM_REPO_CREDENTIALS}':'${env.HELM_REPO_CREDENTIALS}'
+        - --env GERRIT_USERNAME="${env.GERRIT_USERNAME}"
+        - --env GERRIT_PASSWORD="${env.GERRIT_PASSWORD}"
+        - --env GIT_REPO_URL="${git_repo_url}"
+        - --env CHART_PATH="${int_chart_path}"
+        - --env HELM_INTERNAL_REPO="${chart-repo-drop}"
+        - --env HELM_DROP_REPO="${chart-repo-drop}"
+        - --env HELM_RELEASED_REPO="${chart-repo-drop}"
+        - --env ARM_API_TOKEN="${env.ARM_API_TOKEN}"
+        - --env ALLOW_DOWNGRADE="true"
+        - --env CHART_NAME="${env.CHART_NAME}"
+        - --env CHART_VERSION="${env.CHART_VERSION}"
+        - --env CHART_REPO="${env.CHART_REPO}"
+        - --env IGNORE_NON_RELEASED="false"
+        - --env AUTOMATIC_RELEASE="false"
+        - --env ALWAYS_RELEASE="false"
+        - --env HELM_REPO_CREDENTIALS="${env.HELM_REPO_CREDENTIALS}"
+        - --env CI_HELM="true"
+
+      cmd:
+        - ihc-auto publish

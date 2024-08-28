@@ -1,0 +1,111 @@
+#!/usr/bin/env groovy
+
+def defaultBobImage = 'armdocker.rnd.ericsson.se/sandbox/adp-staging/adp-cicd/bob.2.0:1.5.0-1'
+
+def bob = new BobCommand()
+        .bobImage(defaultBobImage)
+        .needDockerSocket(true)
+        .toString()
+
+pipeline {
+    options {
+        disableConcurrentBuilds()
+    }
+    agent {
+            node
+            {
+               label SLAVE
+            }
+        }
+    parameters {
+           string(name: 'CHART_NAME', defaultValue: 'eric-si-application-sys-info-handler', description: 'Chart name e.g.: eric-si-application-sys-info-handler')
+           string(name: 'CHART_REPO', defaultValue: 'https://arm.sero.gic.ericsson.se/artifactory/proj-adp-eric-application-sys-info-handler-released-helm-local/eric-si-application-sys-info-handler/', description: 'Chart repo e.g.: https://arm.sero.gic.ericsson.se/artifactory/proj-adp-eric-application-sys-info-handler-released-helm-local/eric-si-application-sys-info-handler/')
+           string(name: 'CHART_VERSION', defaultValue: '', description: 'Chart version e.g.: 2.5.0+5')
+           string(name: 'INT_ENM_CHART', defaultValue: 'eric-enm-int-sysinfo-handler', description: 'eric-enm-int-sysinfo-handler')
+           string(name: 'GERRIT_REFSPEC', defaultValue: '')
+    }
+    stages {
+        stage('Clean') {
+            steps {
+                 sh "${bob} -r ruleset2.0.yaml clean"
+            }
+        }
+    stage('Inject Credential Files') {
+        steps {
+            withCredentials([file(credentialsId: 'lciadm100-docker-auth', variable: 'dockerConfig')]) {
+                sh "install -m 600 ${dockerConfig} ${HOME}/.docker/config.json"
+            }
+        }
+    }
+        stage('Publish Helm Chart') {
+            steps {
+               script{
+                      withCredentials([usernamePassword(credentialsId: 'cenmbuild_gerrit_api_token', usernameVariable: 'GERRIT_USERNAME', passwordVariable: 'GERRIT_PASSWORD'),
+                                       string(credentialsId: 'lciadm100', variable: 'ARM_API_TOKEN'),
+                      file(credentialsId: 'cenm_repo_credentials', variable: 'HELM_REPO_CREDENTIALS')]) {
+                      def bobwithprepare = new BobCommand()
+                         .bobImage(defaultBobImage)
+                         .needDockerSocket(true)
+                         .envVars(['CHART_NAME': env.CHART_NAME,
+                                   'CHART_REPO': env.CHART_REPO,
+                                   'CHART_VERSION': env.CHART_VERSION,
+                                   'ARM_API_TOKEN': env.ARM_API_TOKEN,
+                                   'GERRIT_USERNAME': env.GERRIT_USERNAME,
+                                   'GERRIT_PASSWORD': env.GERRIT_PASSWORD,
+                                   'HELM_REPO_CREDENTIALS': env.HELM_REPO_CREDENTIALS,
+                                   'HELM_INTERNAL_REPO': env.HELM_INTERNAL_REPO,
+                                   'HELM_DROP_REPO': env.HELM_DROP_REPO,
+                                   'HELM_RELEASED_REPO': env.HELM_RELEASED_REPO
+                         ])
+                         .toString()
+                    sh "chmod -R 777 ${WORKSPACE}@tmp"
+                    sh "${bobwithprepare} -r ruleset2.0.yaml publish"
+                   }
+                }
+             }
+            }
+        stage('Archive artifact.properties') {
+            steps {
+                archiveArtifacts 'artifact.properties'
+            }
+          }
+        }
+}
+
+// More about @Builder: http://mrhaki.blogspot.com/2014/05/groovy-goodness-use-builder-ast.html
+import groovy.transform.builder.Builder
+import groovy.transform.builder.SimpleStrategy
+@Builder(builderStrategy = SimpleStrategy, prefix = '')
+class BobCommand {
+    def bobImage = 'bob.2.0:latest'
+    def envVars = [:]
+    def needDockerSocket = false
+
+    String toString() {
+        def env = envVars
+                .collect({ entry -> "-e ${entry.key}=\"${entry.value}\"" })
+                .join(' ')
+
+        def cmd = """\
+            |docker run
+            |--init
+            |--rm
+            |--workdir \${PWD}
+            |--user \$(id -u):\$(id -g)
+            |-v \${PWD}:\${PWD}
+            |-v /etc/group:/etc/group:ro
+            |-v /etc/passwd:/etc/passwd:ro
+            |-v \${HOME}/.m2:\${HOME}/.m2
+            |-v \${HOME}/.docker:\${HOME}/.docker
+            |${needDockerSocket ? '-v /var/run/docker.sock:/var/run/docker.sock' : ''}
+            |${env}
+            |\$(for group in \$(id -G); do printf ' --group-add %s' "\$group"; done)
+            |--group-add \$(stat -c '%g' /var/run/docker.sock)
+            |${bobImage}
+            |"""
+        return cmd
+                .stripMargin()           // remove indentation
+                .replace('\n', ' ')      // join lines
+                .replaceAll(/[ ]+/, ' ') // replace multiple spaces by one
+    }
+}
